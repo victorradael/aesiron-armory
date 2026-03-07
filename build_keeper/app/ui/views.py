@@ -31,6 +31,7 @@ def render_registration_screen():
             set_name = st.text_input(
                 "NOME DO CONJUNTO", placeholder="Ex: Armadura de Batalha Sagrada"
             )
+            set_type = st.radio("TIPO", options=["R", "C"], horizontal=True)
 
             st.divider()
             st.subheader("🧩 Peças do Conjunto")
@@ -67,7 +68,7 @@ def render_registration_screen():
                 if not set_name.strip():
                     st.error("⚠️ Por favor, insira um nome para o conjunto.")
                 else:
-                    add_equipment_set(set_name, equipment_flags, custom_names)
+                    add_equipment_set(set_name, set_type, equipment_flags, custom_names)
                     st.success(f"✅ Conjunto '{set_name}' salvo com sucesso!")
 
 
@@ -77,6 +78,11 @@ def render_edit_screen(set_data):
     with st.container(border=True):
         with st.form(f"edit_form_{set_data['id']}"):
             new_set_name = st.text_input("NOME DO CONJUNTO", value=set_data["name"])
+
+            current_type_idx = 0 if set_data.get("type", "R") == "R" else 1
+            set_type = st.radio(
+                "TIPO", options=["R", "C"], horizontal=True, index=current_type_idx
+            )
 
             st.divider()
             st.subheader("🧩 Peças do Conjunto")
@@ -123,7 +129,11 @@ def render_edit_screen(set_data):
                     st.error("⚠️ O nome não pode ser vazio.")
                 else:
                     update_equipment_set(
-                        set_data["id"], new_set_name, equipment_flags, custom_names
+                        set_data["id"],
+                        new_set_name,
+                        set_type,
+                        equipment_flags,
+                        custom_names,
                     )
                     st.session_state.edit_mode_id = None
                     st.success("✅ Conjunto atualizado!")
@@ -137,6 +147,76 @@ def render_edit_screen(set_data):
                 delete_equipment_set(set_data["id"])
                 st.session_state.edit_mode_id = None
                 st.success("🗑️ Conjunto removido!")
+                st.rerun()
+
+
+def _render_single_set(s):
+    items_in_set = s["_items_in_set"]
+    total_items = s["_total_items"]
+    acquired_items = s["_acquired_items"]
+    is_complete = s["_is_complete"]
+
+    progress_val = (acquired_items / total_items) if total_items > 0 else 0
+
+    expander_title = f"{'🏆 ' if is_complete else '🛡️ '}{s['name']}"
+
+    with st.expander(expander_title, expanded=False):
+        if is_complete:
+            st.markdown(
+                "<div class='completed-badge'>Conjunto Completo! 🎉</div>",
+                unsafe_allow_html=True,
+            )
+
+        if total_items > 0:
+            st.progress(
+                progress_val,
+                text=f"Progresso de Coleta: {acquired_items}/{total_items} ({int(progress_val * 100)}%)",
+            )
+            st.divider()
+
+        if not items_in_set:
+            st.write(
+                "Cuidado: Este conjunto **não possui peças** configuradas. Edite para adicionar partes."
+            )
+        else:
+            for key, data in items_in_set.items():
+                base_label = EQUIPMENT_TYPES.get(key, key)
+                custom_name = data.get("custom_name", "").strip()
+
+                display_label = (
+                    f"**{custom_name}** ({base_label})"
+                    if custom_name
+                    else f"{base_label}"
+                )
+
+                cb_key = f"cb_{s['id']}_{key}"
+                current_status = data.get("acquired", False)
+                new_status = st.checkbox(
+                    display_label, value=current_status, key=cb_key
+                )
+
+                if new_status != current_status:
+                    update_equipment_acquisition(s["id"], key, new_status)
+                    st.rerun()
+
+        st.divider()
+        col1, col2 = st.columns([1, 1], gap="medium")
+        with col1:
+            if st.button(
+                "💾 Clonar",
+                key=f"btn_clone_{s['id']}",
+                use_container_width=True,
+            ):
+                if clone_equipment_set(s["id"]):
+                    st.success("Conjunto clonado com sucesso!")
+                    st.rerun()
+        with col2:
+            if st.button(
+                "✏️ Editar",
+                key=f"btn_edit_{s['id']}",
+                use_container_width=True,
+            ):
+                st.session_state.edit_mode_id = s["id"]
                 st.rerun()
 
 
@@ -166,8 +246,10 @@ def render_checklist_screen():
         )
         return
 
+    complete_sets = []
+    incomplete_sets = []
+
     for s in sets:
-        # Calculate progress
         items_in_set = {
             k: v for k, v in s["equipment"].items() if v.get("has_in_set", False)
         }
@@ -176,66 +258,37 @@ def render_checklist_screen():
             1 for data in items_in_set.values() if data.get("acquired", False)
         )
 
-        progress_val = (acquired_items / total_items) if total_items > 0 else 0
-        is_complete = total_items > 0 and acquired_items == total_items
+        s["_items_in_set"] = items_in_set
+        s["_total_items"] = total_items
+        s["_acquired_items"] = acquired_items
+        s["_is_complete"] = total_items > 0 and acquired_items == total_items
 
-        expander_title = f"{'🏆 ' if is_complete else '🛡️ '}{s['name']} - {acquired_items}/{total_items}"
+        if s["_is_complete"]:
+            complete_sets.append(s)
+        else:
+            incomplete_sets.append(s)
 
-        with st.expander(expander_title, expanded=False):
-            if is_complete:
-                st.markdown(
-                    "<div class='completed-badge'>Conjunto Completo! 🎉</div>",
-                    unsafe_allow_html=True,
-                )
+    complete_sets.sort(key=lambda x: x["name"].lower())
+    incomplete_sets.sort(key=lambda x: x["name"].lower())
 
-            if total_items > 0:
-                st.progress(
-                    progress_val,
-                    text=f"Progresso de Coleta: {int(progress_val * 100)}%",
-                )
-                st.divider()
+    def render_sets_in_columns(subset):
+        if not subset:
+            st.info("Nenhum conjunto nesta categoria.")
+            return
 
-            if not items_in_set:
-                st.write(
-                    "Cuidado: Este conjunto **não possui peças** configuradas. Edite para adicionar partes."
-                )
+        col_r, col_c = st.columns(2)
+        for s in subset:
+            if s.get("type", "R") == "R":
+                with col_r:
+                    _render_single_set(s)
             else:
-                for key, data in items_in_set.items():
-                    base_label = EQUIPMENT_TYPES.get(key, key)
-                    custom_name = data.get("custom_name", "").strip()
+                with col_c:
+                    _render_single_set(s)
 
-                    display_label = (
-                        f"**{custom_name}** ({base_label})"
-                        if custom_name
-                        else f"{base_label}"
-                    )
+    st.subheader("🚧 Conjuntos Incompletos")
+    render_sets_in_columns(incomplete_sets)
 
-                    cb_key = f"cb_{s['id']}_{key}"
-                    current_status = data.get("acquired", False)
-                    new_status = st.checkbox(
-                        display_label, value=current_status, key=cb_key
-                    )
+    st.divider()
 
-                    if new_status != current_status:
-                        update_equipment_acquisition(s["id"], key, new_status)
-                        st.rerun()
-
-            st.divider()
-            col1, col2 = st.columns([1, 1], gap="medium")
-            with col1:
-                if st.button(
-                    "💾 Clonar",
-                    key=f"btn_clone_{s['id']}",
-                    use_container_width=True,
-                ):
-                    if clone_equipment_set(s["id"]):
-                        st.success("Conjunto clonado com sucesso!")
-                        st.rerun()
-            with col2:
-                if st.button(
-                    "✏️ Editar",
-                    key=f"btn_edit_{s['id']}",
-                    use_container_width=True,
-                ):
-                    st.session_state.edit_mode_id = s["id"]
-                    st.rerun()
+    st.subheader("🏆 Conjuntos Completos")
+    render_sets_in_columns(complete_sets)

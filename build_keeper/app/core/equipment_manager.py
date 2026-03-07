@@ -64,7 +64,10 @@ def _get_unique_name(
 
 
 def add_equipment_set(
-    name: str, equipment_flags: Dict[str, bool], custom_names: Dict[str, str]
+    name: str,
+    set_type: str,
+    equipment_flags: Dict[str, bool],
+    custom_names: Dict[str, str],
 ) -> None:
     """Adds a new equipment set ensuring the name is unique."""
     sets = load_equipment_sets()
@@ -81,6 +84,7 @@ def add_equipment_set(
     new_set = {
         "id": str(uuid.uuid4()),
         "name": unique_name,
+        "type": set_type,
         "equipment": equipment_data,
     }
 
@@ -92,6 +96,7 @@ def add_equipment_set(
 def update_equipment_set(
     set_id: str,
     new_name: str,
+    set_type: str,
     equipment_flags: Dict[str, bool],
     custom_names: Dict[str, str],
 ) -> None:
@@ -101,6 +106,7 @@ def update_equipment_set(
     for s in sets:
         if s["id"] == set_id:
             s["name"] = _get_unique_name(new_name, sets, ignore_id=set_id)
+            s["type"] = set_type
 
             for item, has_in_set in equipment_flags.items():
                 if item not in s["equipment"]:
@@ -146,9 +152,6 @@ def clone_equipment_set(set_id: str) -> bool:
     cloned_set["id"] = str(uuid.uuid4())
     cloned_set["name"] = _get_unique_name(f"{cloned_set['name']} (Clone)", sets)
 
-    for item in cloned_set["equipment"].values():
-        item["acquired"] = False
-
     sets.append(cloned_set)
     save_equipment_sets(sets)
     logger.info(
@@ -171,3 +174,32 @@ def update_equipment_acquisition(
                 )
                 break
     save_equipment_sets(sets)
+
+
+def bulk_update_from_dataframe(updated_flat_data: List[Dict[str, Any]]) -> None:
+    """Updates sets in bulk from a flattened dataframe-like representation."""
+    sets = load_equipment_sets()
+    sets_by_id = {s["id"]: s for s in sets}
+
+    for row in updated_flat_data:
+        set_id = row.get("id")
+        if not set_id or set_id not in sets_by_id:
+            continue
+
+        s = sets_by_id[set_id]
+        s["name"] = row.get("Nome", s["name"])
+        s["type"] = row.get("Tipo", s.get("type", "R"))
+
+        for key, value in row.items():
+            if key not in ["id", "Nome", "Tipo", "Completo"]:
+                if key in s["equipment"]:
+                    s["equipment"][key]["has_in_set"] = bool(value)
+                else:
+                    s["equipment"][key] = {
+                        "has_in_set": bool(value),
+                        "acquired": False,
+                        "custom_name": "",
+                    }
+
+    save_equipment_sets(sets)
+    logger.info(f"Bulk updated {len(updated_flat_data)} equipment sets.")
