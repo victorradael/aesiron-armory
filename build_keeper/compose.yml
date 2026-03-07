@@ -1,0 +1,17 @@
+services:
+  build_keeper:
+    build: .
+    image: app-aesiron-build_keeper
+    container_name: app-aesiron-build_keeper
+    volumes:
+      - ./app:/app
+    ports:
+      - "8503:8503"
+    env_file:
+      - .env
+    networks:
+      - aesiron-net
+
+networks:
+  aesiron-net:
+    external: true
