@@ -108,16 +108,24 @@ def update_equipment_set(
             s["name"] = _get_unique_name(new_name, sets, ignore_id=set_id)
             s["type"] = set_type
 
+            # Iterate through all possible equipment keys, checking if they should be in the set
             for item, has_in_set in equipment_flags.items():
-                if item not in s["equipment"]:
-                    s["equipment"][item] = {
-                        "has_in_set": False,
-                        "acquired": False,
-                        "custom_name": "",
-                    }
+                if has_in_set:
+                    # Item should be in set, add/update it
+                    if item not in s["equipment"]:
+                        s["equipment"][item] = {
+                            "has_in_set": True,
+                            "acquired": False,
+                            "custom_name": custom_names.get(item, ""),
+                        }
+                    else:
+                        s["equipment"][item]["has_in_set"] = True
+                        s["equipment"][item]["custom_name"] = custom_names.get(item, "")
+                else:
+                    # Item shouldn't be in set, ensure it's removed
+                    if item in s["equipment"]:
+                        del s["equipment"][item]
 
-                s["equipment"][item]["has_in_set"] = has_in_set
-                s["equipment"][item]["custom_name"] = custom_names.get(item, "")
             logger.info(f"Updated equipment set '{set_id}' to name '{s['name']}'")
             break
 
@@ -141,18 +149,25 @@ def delete_equipment_set(set_id: str) -> bool:
 def clone_equipment_set(set_id: str) -> bool:
     """Clones an equipment set by its ID."""
     sets = load_equipment_sets()
-    original_set = next((s for s in sets if s["id"] == set_id), None)
+    original_set_index = next(
+        (i for i, s in enumerate(sets) if s["id"] == set_id), None
+    )
 
-    if not original_set:
+    if original_set_index is None:
         return False
+
+    original_set = sets[original_set_index]
 
     cloned_set = json.loads(
         json.dumps(original_set)
     )  # Deep copy to also copy custom names safely
+
     cloned_set["id"] = str(uuid.uuid4())
     cloned_set["name"] = _get_unique_name(f"{cloned_set['name']} (Clone)", sets)
 
-    sets.append(cloned_set)
+    # Insert the cloned set right after the original one
+    sets.insert(original_set_index + 1, cloned_set)
+
     save_equipment_sets(sets)
     logger.info(
         f"Cloned equipment set id '{set_id}' to new set '{cloned_set['name']}' (ID: {cloned_set['id']})"
