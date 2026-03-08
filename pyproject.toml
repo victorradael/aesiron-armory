@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "aesiron-armory"
+version = "0.1.0"
+description = "Repository for storing and managing applications generated with the Aesiron framework"
+authors = ["Victor Radael"]
+readme = "README.md"
+packages = []
+
+[tool.poetry.dependencies]
+python = "^3.10"
+aesiron = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
