@@ -1,4 +1,6 @@
 import streamlit as st
+import unicodedata
+from core.equipment_catalog import EQUIPMENT_TYPES
 from core.equipment_manager import (
     load_equipment_sets,
     add_equipment_set,
@@ -6,18 +8,85 @@ from core.equipment_manager import (
     delete_equipment_set,
     clone_equipment_set,
     update_equipment_acquisition,
+    prepare_set_for_display,
 )
 
-EQUIPMENT_TYPES = {
-    "capacete": "🪖 Capacete",
-    "peitoral": "👕 Peitoral",
-    "calças": "👖 Calças",
-    "anel_1": "💍 Anel 1",
-    "anel_2": "💍 Anel 2",
-    "colar": "📿 Colar",
-    "mochila": "🎒 Mochila",
-    "mao_secundaria": "🛡️ Mão Secundária",
-}
+
+def _normalize_search_text(value):
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(char for char in normalized if not unicodedata.combining(char)).lower()
+
+
+def _get_searchable_text(set_data):
+    custom_names = []
+    for item_data in set_data.get("equipment", {}).values():
+        if item_data.get("has_in_set"):
+            custom_name = item_data.get("custom_name", "").strip()
+            if custom_name:
+                custom_names.append(custom_name)
+
+    return _normalize_search_text(" ".join([set_data.get("name", ""), *custom_names]))
+
+
+def _render_equipment_inputs(form_prefix, equipment_data=None):
+    equipment_data = equipment_data or {}
+    equipment_flags = {}
+    custom_names = {}
+
+    for key, base_label in EQUIPMENT_TYPES.items():
+        item_data = equipment_data.get(key, {})
+        has_in_set = item_data.get("has_in_set", True if not equipment_data else False)
+        custom_name_value = item_data.get("custom_name", "")
+
+        cols = st.columns([1, 2], vertical_alignment="center")
+        with cols[0]:
+            is_selected = st.checkbox(
+                base_label,
+                value=has_in_set,
+                key=f"{form_prefix}_{key}_check",
+            )
+            equipment_flags[key] = is_selected
+        with cols[1]:
+            custom_name = st.text_input(
+                "Nome Específico",
+                value=custom_name_value,
+                key=f"{form_prefix}_{key}_name",
+                disabled=not is_selected,
+                label_visibility="collapsed",
+                placeholder=f"Nome do {base_label.split(' ')[1]}...",
+            )
+            custom_names[key] = custom_name.strip()
+
+    return equipment_flags, custom_names
+
+
+def _get_filtered_sets(sets, search_term):
+    normalized_search_term = _normalize_search_text(search_term)
+    filtered_sets = []
+
+    for set_data in sets:
+        prepared_set = prepare_set_for_display(set_data)
+        if normalized_search_term and normalized_search_term not in _get_searchable_text(
+            prepared_set
+        ):
+            continue
+        filtered_sets.append(prepared_set)
+
+    filtered_sets.sort(key=lambda set_data: set_data["name"].lower())
+    return filtered_sets
+
+
+def _split_sets_by_completion(sets):
+    complete_sets = []
+    incomplete_sets = []
+
+    for set_data in sets:
+        if set_data["_is_complete"]:
+            complete_sets.append(set_data)
+        else:
+            incomplete_sets.append(set_data)
+
+    return incomplete_sets, complete_sets
 
 
 def render_registration_screen():
@@ -39,25 +108,7 @@ def render_registration_screen():
                 "Selecione quais itens formam este conjunto e o nome específico de cada um deles (opcional)."
             )
 
-            equipment_flags = {}
-            custom_names = {}
-
-            for key, base_label in EQUIPMENT_TYPES.items():
-                cols = st.columns([1, 2], vertical_alignment="center")
-                with cols[0]:
-                    has_in_set = st.checkbox(
-                        base_label, value=True, key=f"new_{key}_check"
-                    )
-                    equipment_flags[key] = has_in_set
-                with cols[1]:
-                    custom_name = st.text_input(
-                        "Nome Específico",
-                        key=f"new_{key}_name",
-                        disabled=not has_in_set,
-                        label_visibility="collapsed",
-                        placeholder=f"Nome do {base_label.split(' ')[1]}...",
-                    )
-                    custom_names[key] = custom_name.strip()
+            equipment_flags, custom_names = _render_equipment_inputs("new")
 
             st.divider()
             submitted = st.form_submit_button(
@@ -87,31 +138,10 @@ def render_edit_screen(set_data):
             st.divider()
             st.subheader("🧩 Peças do Conjunto")
 
-            equipment_flags = {}
-            custom_names = {}
-
-            for key, base_label in EQUIPMENT_TYPES.items():
-                item_data = set_data["equipment"].get(key, {})
-                current_has_in_set = item_data.get("has_in_set", False)
-                current_custom_name = item_data.get("custom_name", "")
-
-                cols = st.columns([1, 2], vertical_alignment="center")
-                with cols[0]:
-                    has_in_set = st.checkbox(
-                        base_label,
-                        value=current_has_in_set,
-                        key=f"edit_{set_data['id']}_{key}_check",
-                    )
-                    equipment_flags[key] = has_in_set
-                with cols[1]:
-                    custom_name = st.text_input(
-                        "Nome Específico",
-                        value=current_custom_name,
-                        key=f"edit_{set_data['id']}_{key}_name",
-                        disabled=not has_in_set,
-                        label_visibility="collapsed",
-                    )
-                    custom_names[key] = custom_name.strip()
+            equipment_flags, custom_names = _render_equipment_inputs(
+                f"edit_{set_data['id']}",
+                equipment_data=set_data["equipment"],
+            )
 
             st.divider()
             col1, col2, col3 = st.columns([2, 1, 1])
@@ -246,30 +276,12 @@ def render_checklist_screen():
         )
         return
 
-    complete_sets = []
-    incomplete_sets = []
-
-    for s in sets:
-        items_in_set = {
-            k: v for k, v in s["equipment"].items() if v.get("has_in_set", False)
-        }
-        total_items = len(items_in_set)
-        acquired_items = sum(
-            1 for data in items_in_set.values() if data.get("acquired", False)
-        )
-
-        s["_items_in_set"] = items_in_set
-        s["_total_items"] = total_items
-        s["_acquired_items"] = acquired_items
-        s["_is_complete"] = total_items > 0 and acquired_items == total_items
-
-        if s["_is_complete"]:
-            complete_sets.append(s)
-        else:
-            incomplete_sets.append(s)
-
-    complete_sets.sort(key=lambda x: x["name"].lower())
-    incomplete_sets.sort(key=lambda x: x["name"].lower())
+    search_term = st.text_input(
+        "Buscar builds",
+        placeholder="Ex: cosmo, sentinela ou viseira",
+    ).strip()
+    filtered_sets = _get_filtered_sets(sets, search_term)
+    incomplete_sets, complete_sets = _split_sets_by_completion(filtered_sets)
 
     def render_sets_in_columns(subset):
         if not subset:
@@ -284,6 +296,15 @@ def render_checklist_screen():
             else:
                 with col_c:
                     _render_single_set(s)
+
+    if search_term:
+        st.caption(
+            f"{len(filtered_sets)} build(s) encontrado(s) para '{search_term}'."
+        )
+
+    if not filtered_sets:
+        st.info("Nenhum build encontrado com esse termo de busca.", icon="🔎")
+        return
 
     st.subheader("🚧 Conjuntos Incompletos")
     render_sets_in_columns(incomplete_sets)

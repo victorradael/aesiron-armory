@@ -1,7 +1,7 @@
 import json
 import os
-import uuid
 import re
+import uuid
 from typing import List, Dict, Any
 
 from core.logger import get_logger
@@ -9,6 +9,64 @@ from core.logger import get_logger
 logger = get_logger(__name__)
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "equipment_sets.json")
+
+
+def _build_equipment_item(
+    has_in_set: bool, acquired: bool = False, custom_name: str = ""
+) -> Dict[str, Any]:
+    return {
+        "has_in_set": has_in_set,
+        "acquired": acquired,
+        "custom_name": custom_name,
+    }
+
+
+def _get_items_in_set(set_data: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in set_data.get("equipment", {}).items()
+        if value.get("has_in_set", False)
+    }
+
+
+def prepare_set_for_display(set_data: Dict[str, Any]) -> Dict[str, Any]:
+    items_in_set = _get_items_in_set(set_data)
+    total_items = len(items_in_set)
+    acquired_items = sum(
+        1 for item_data in items_in_set.values() if item_data.get("acquired", False)
+    )
+
+    return {
+        **set_data,
+        "_items_in_set": items_in_set,
+        "_total_items": total_items,
+        "_acquired_items": acquired_items,
+        "_is_complete": total_items > 0 and acquired_items == total_items,
+    }
+
+
+def build_bulk_edit_rows(
+    sets: List[Dict[str, Any]], equipment_keys: List[str]
+) -> List[Dict[str, Any]]:
+    rows = []
+
+    for set_data in sets:
+        prepared_set = prepare_set_for_display(set_data)
+        row = {
+            "id": prepared_set["id"],
+            "Nome": prepared_set["name"],
+            "Tipo": prepared_set.get("type", "R"),
+            "Completo": "✅ Sim" if prepared_set["_is_complete"] else "❌ Não",
+        }
+
+        for key in equipment_keys:
+            row[key] = prepared_set.get("equipment", {}).get(key, {}).get(
+                "has_in_set", False
+            )
+
+        rows.append(row)
+
+    return rows
 
 
 def load_equipment_sets() -> List[Dict[str, Any]]:
@@ -35,7 +93,7 @@ def save_equipment_sets(sets: List[Dict[str, Any]]) -> None:
 
 
 def _get_unique_name(
-    base_name: str, sets: List[Dict[str, Any]], ignore_id: str = None
+    base_name: str, sets: List[Dict[str, Any]], ignore_id: Any = None
 ) -> str:
     """Generates a unique name by appending an incrementing number if the base_name exists."""
     existing_names = [s["name"] for s in sets if s.get("id") != ignore_id]
@@ -73,13 +131,14 @@ def add_equipment_set(
     sets = load_equipment_sets()
     unique_name = _get_unique_name(name, sets)
 
-    equipment_data = {}
-    for item, has_in_set in equipment_flags.items():
-        equipment_data[item] = {
-            "has_in_set": has_in_set,
-            "acquired": False,
-            "custom_name": custom_names.get(item, ""),
-        }
+    equipment_data = {
+        item: _build_equipment_item(
+            has_in_set=has_in_set,
+            acquired=False,
+            custom_name=custom_names.get(item, ""),
+        )
+        for item, has_in_set in equipment_flags.items()
+    }
 
     new_set = {
         "id": str(uuid.uuid4()),
@@ -113,11 +172,11 @@ def update_equipment_set(
                 if has_in_set:
                     # Item should be in set, add/update it
                     if item not in s["equipment"]:
-                        s["equipment"][item] = {
-                            "has_in_set": True,
-                            "acquired": False,
-                            "custom_name": custom_names.get(item, ""),
-                        }
+                        s["equipment"][item] = _build_equipment_item(
+                            has_in_set=True,
+                            acquired=False,
+                            custom_name=custom_names.get(item, ""),
+                        )
                     else:
                         s["equipment"][item]["has_in_set"] = True
                         s["equipment"][item]["custom_name"] = custom_names.get(item, "")
@@ -210,11 +269,11 @@ def bulk_update_from_dataframe(updated_flat_data: List[Dict[str, Any]]) -> None:
                 if key in s["equipment"]:
                     s["equipment"][key]["has_in_set"] = bool(value)
                 else:
-                    s["equipment"][key] = {
-                        "has_in_set": bool(value),
-                        "acquired": False,
-                        "custom_name": "",
-                    }
+                    s["equipment"][key] = _build_equipment_item(
+                        has_in_set=bool(value),
+                        acquired=False,
+                        custom_name="",
+                    )
 
     save_equipment_sets(sets)
     logger.info(f"Bulk updated {len(updated_flat_data)} equipment sets.")
