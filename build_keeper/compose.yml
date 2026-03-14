@@ -4,7 +4,7 @@ services:
     image: app-aesiron-build_keeper
     container_name: app-aesiron-build_keeper
     volumes:
-      - ./app:/app
+      - ${APP_HOST_PATH:-.}/app:/app
     ports:
       - "8503:8503"
     env_file:
