@@ -1,9 +1,13 @@
 [theme]
-primaryColor = "#7a1fa2"  
-backgroundColor = "#fefdfc"  
-secondaryBackgroundColor = "#F0F0F0" 
-textColor = "#333"  
+primaryColor = "#8b5cf6"
+backgroundColor = "#0f0f14"
+secondaryBackgroundColor = "#1a1a24"
+textColor = "#e8e8f0"
 font = "sans serif"
 
 [server]
 port = 8503
+address = "0.0.0.0"
+headless = true
+enableCORS = false
+enableXsrfProtection = false
