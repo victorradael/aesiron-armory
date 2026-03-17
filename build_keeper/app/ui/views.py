@@ -1,5 +1,6 @@
 import streamlit as st
 import unicodedata
+from core.config_manager import get_app_code, set_app_code
 from core.equipment_catalog import EQUIPMENT_TYPES
 from core.equipment_manager import (
     load_equipment_sets,
@@ -247,6 +248,25 @@ def _render_single_set(s):
                 use_container_width=True,
             ):
                 st.session_state.edit_mode_id = s["id"]
+                st.rerun()
+
+
+def render_sidebar_config() -> None:
+    with st.sidebar:
+        st.subheader("⚙️ Configurações")
+        current_code = get_app_code()
+        new_code = st.text_input(
+            "Código do App",
+            value=current_code,
+            max_chars=20,
+            key="sidebar_app_code_input",
+        )
+        if st.button("Salvar", key="sidebar_app_code_save", use_container_width=True):
+            if not new_code.strip():
+                st.error("O código não pode ser vazio.")
+            elif new_code.strip() != current_code:
+                set_app_code(new_code.strip())
+                st.success("Código atualizado!")
                 st.rerun()
 
 
