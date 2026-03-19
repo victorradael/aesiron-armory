@@ -1,0 +1,17 @@
+import React from 'react';
+import { MainLayout } from './components/layout/MainLayout';
+
+function App() {
+  return (
+    <MainLayout>
+      {(activeTab) => (
+        <div className="flex items-center justify-center h-full">
+          <h1 className="text-6xl font-pixel text-primary animate-pulse uppercase">SYSTEM READY</h1>
+          <p className="text-[#938F99] font-pixel ml-4">TAB: {activeTab}</p>
+        </div>
+      )}
+    </MainLayout>
+  );
+}
+
+export default App;
